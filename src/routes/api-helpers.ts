@@ -1,7 +1,7 @@
 import { server$ } from "@builder.io/qwik-city"
 import { type ConversionInputs } from "."
 
-type CryptoConversion = { 
+type CryptoConversion = {
     status: "Success",
     from_coin_link: string,
     to_coin_link: string | null,
@@ -31,7 +31,8 @@ export async function _getCryptoConversion(inputs: ConversionInputs) {
 export const getCryptoConversion = server$(_getCryptoConversion)
 
 
-export function getHrefFromLink(link: string) { 
+export function getHrefFromLink(link: string) {
+    if (!link) { return link }
     return "https://" + link.split('<a href="//')[1].split('"')[0]
 }
 

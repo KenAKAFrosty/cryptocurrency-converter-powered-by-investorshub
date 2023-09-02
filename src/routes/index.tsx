@@ -1,7 +1,7 @@
-import { type NoSerialize, component$, noSerialize, useSignal, useStylesScoped$, useTask$ } from "@builder.io/qwik";
-import { routeLoader$, type DocumentHead } from "@builder.io/qwik-city";
-import { type CryptoSymbol } from "~/data/coins/all_coins";
-import { type Currency } from "~/data/currencies";
+import { type NoSerialize, component$, noSerialize, useSignal, useStylesScoped$, useTask$, useComputed$, $, useVisibleTask$ } from "@builder.io/qwik";
+import { routeLoader$, type DocumentHead, server$ } from "@builder.io/qwik-city";
+import { CRYPTO_COINS, CRYPTO_SYMBOLS, type CryptoSymbol } from "~/data/coins/all_coins";
+import { CURRENCIES, CURRENCY_DATA, type Currency } from "~/data/currencies";
 import { getCryptoConversion, getHrefFromLink } from "./api-helpers";
 import { syncFavicon, syncQueryParams, getLogo, getTitle } from "./metadata-helpers";
 import { LinkIcon, ShareIcon } from "~/components/hero-icons";
@@ -13,12 +13,12 @@ export const POPULAR_CHOICES: (CryptoSymbol | Currency)[] = [
   "BTC",
   "ETH",
   "LTC",
-  "SATOSHI",
   "GBP",
   "USD",
   "EUR",
   "JPY",
-  "BRL"
+  "BRL",
+  "SATOSHI",
 ]
 
 export const useConversionInputs = routeLoader$(async (event) => {
@@ -46,7 +46,8 @@ export default component$(() => {
   useStylesScoped$(`
     section { 
       text-align: center;
-      width: 400px;
+      min-width: 540px;
+      width: fit-content;
       background: #fafafa;
       border-radius: 8px;
       padding: 8px;
@@ -59,7 +60,7 @@ export default component$(() => {
     }
     h2 { 
       margin: 4px;
-      font-size: 32px;
+      font-size: 48px;
     }
     main { 
       display: flex;
@@ -74,9 +75,11 @@ export default component$(() => {
       color: #inherit;
     }
     input { 
-      font-size: 20px;
+      font-size: 22px;
       text-align: center;
-      width: 120px;
+      min-width: 120px;
+      max-width: 180px;
+      width: 100%;
     }
     .share { 
       position: absolute;
@@ -127,9 +130,49 @@ export default component$(() => {
       margin: 4px;
       box-shadow: 0 0 7px rgba(0,0,0,0.1);
       min-width: 140px;
+      min-height: 160px;
+      position: relative;
     }
-    .currency p { 
-      font-size: 24px;
+    .popular-choices { 
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .popular-choices button { 
+      cursor: pointer;
+      width: 70px;
+    }
+    input.currency-search { 
+      font-size: 14px;
+      min-width: 60px;
+      width: 60px;
+    }
+
+    .currency .results { 
+      z-index: 2;
+      position: absolute;
+      right: 0px;
+      top: 24px;
+      background: white;
+      box-shadow: 0 0 8px rgba(0,0,0,0.2);
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .currency .results button { 
+      cursor: pointer;
+      border: none;
+      background: none;
+      display: block;
+      padding: 8px 2px;
+      margin: 4px;
+      min-width: 190px;
+      width: 92%;
+      font-size: 14px;
+      text-align: left;
+    }
+    .currency .results button:hover { 
+      background: #fafafa;
+      outline: 1px solid black;
     }
   `);
 
@@ -137,7 +180,13 @@ export default component$(() => {
 
   const conversionInputs = useSignal(useConversionInputs().value);
   const conversion = useSignal(useLoadedConversion().value);
-  // const isLoading = useSignal(false);
+  const syncConversion = $(() => {
+    getCryptoConversion({
+      from: conversionInputs.value.from,
+      to: conversionInputs.value.to,
+      amount: conversionInputs.value.amount
+    }).then(newConversion => conversion.value = newConversion)
+  })
 
   useTask$(({ track }) => {
     track(() => conversionInputs.value);
@@ -218,8 +267,37 @@ export default component$(() => {
     }
   });
 
+  console.log(conversion.value);
 
   const clickedShare = useSignal(false);
+  const invalidConversion = useComputed$(() => conversion.value.amount === 0);
+
+
+  const fromSearch = useSignal("");
+  const fromResults = useSignal<Array<{symbol: string, name: string}>>([]);
+
+  const toSearch = useSignal("");
+  const toResults = useSignal<Array<{symbol: string, name: string}>>([]);
+
+  useVisibleTask$(({track})=> { 
+    track(()=> fromSearch.value);
+    if (fromSearch.value === "") { return }
+    autoCompleteCurrency(fromSearch.value).then(results => {
+      fromResults.value = results;
+    });
+  });
+
+  useVisibleTask$(({track})=> {
+    track(()=> toSearch.value);
+    if (toSearch.value === "") { return }
+    autoCompleteCurrency(toSearch.value).then(results => {
+      toResults.value = results;
+    });
+  });
+
+  const areSame = useComputed$(()=> { 
+    return conversionInputs.value.from === conversionInputs.value.to;
+  })
   return (
     <section>
       {<div class="share flex-row" onClick$={() => {
@@ -234,34 +312,108 @@ export default component$(() => {
       <h1>Cryptocurrency Converter</h1>
       <main>
 
-        {conversion.value.amount === 0 && <p>Cannot convert between these two.</p>}
+        {invalidConversion.value === true && <p>Cannot convert between these two.</p>}
         <div class="flex-row currencies">
-          <div class="currency">
-            <div class="flex-row">
-              <h2>{conversion.value.from.currency}</h2>
-              <a target="_blank" href={getHrefFromLink(conversion.value.from_coin_link)}>
-                <LinkIcon />
-              </a>
-            </div>
-            <input bind:value={fromInput} />
+          <div class="popular-choices from">
+            {POPULAR_CHOICES.map((choice) => {
+              return <button onClick$={() => {
+                conversionInputs.value = {
+                  ...conversionInputs.value,
+                  from: choice
+                }
+                syncConversion();
+              }} key={choice}
+              >
+                {choice}
+              </button>
+            })}
           </div>
+
           <div class="currency">
             <div class="flex-row">
-              <h2>{conversion.value.to.currency}</h2>
-              {conversion.value.to_coin_link && <a target="_blank" href={getHrefFromLink(conversion.value.to_coin_link)}>
+              <img height={40} width={40} src={`/currency_image/${conversion.value.from.currency}`} />
+              <h2>{conversion.value.from.currency}</h2>
+              {invalidConversion.value === false && <a target="_blank" href={getHrefFromLink(conversion.value.from_coin_link)}>
                 <LinkIcon />
               </a>}
             </div>
+            <input style={{marginLeft: "auto"}} bind:value={fromInput} />
+            <div class="flex-row" style={{marginTop: "20px", position: "relative"}}>
+              <span style={{flexGrow: 1, textAlign: "right"}}>Search 🔎</span>
+              <input class="currency-search" bind:value={fromSearch} />
+              <div class="results">
+                {fromResults.value.map(result => {
+                  return <button key={result.symbol} onClick$={()=> { 
+                    conversionInputs.value = {
+                      ...conversionInputs.value,
+                      from: result.symbol as CryptoSymbol | Currency
+                    }
+                    fromSearch.value = "";
+                    fromResults.value = [];
+                    syncConversion();
+                  }}>
+                    ({result.symbol}) {result.name}
+                  </button>
+                })}
+              </div>
+            </div>
+          </div>
+
+
+          <div class="currency">
+            <div class="flex-row">
+              <img height={40} width={40} src={`/currency_image/${conversion.value.to.currency}`} />
+              <h2>{conversion.value.to.currency}</h2>
+              {conversion.value.to_coin_link && invalidConversion.value === false &&
+                <a target="_blank" href={getHrefFromLink(conversion.value.to_coin_link)}>
+                  <LinkIcon />
+                </a>}
+            </div>
             <input bind:value={toInput} />
+            <div class="flex-row" style={{marginTop: "20px",  position: "relative"}}>
+              <span style={{flexGrow: 1, textAlign: "right"}}>Search 🔎</span>
+              <input class="currency-search" bind:value={toSearch} />
+              <div class="results">
+                {toResults.value.map(result => {
+                  return <button key={result.symbol} onClick$={()=> { 
+                    conversionInputs.value = {
+                      ...conversionInputs.value,
+                      to: result.symbol as CryptoSymbol | Currency
+                    }
+                    toSearch.value = "";
+                    toResults.value = [];
+                    syncConversion();
+                  }}>
+                    ({result.symbol}) {result.name}
+                  </button>
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div class="popular-choices to">
+            <div class="popular-choices">
+              {POPULAR_CHOICES.map((choice) => {
+                return <button onClick$={() => {
+                  conversionInputs.value = {
+                    ...conversionInputs.value,
+                    to: choice
+                  }
+                  syncConversion();
+                }} key={choice}
+                >
+                  {choice}
+                </button>
+              })}
+            </div>
           </div>
         </div>
 
         <div class={{
           "flex-row": true,
-          // "bloading": isLoading.value,
           "chart": true
         }}>
-          {conversion.value.chart.link && conversion.value.chart.image && <>
+          {areSame.value === false && conversion.value.chart.link && conversion.value.chart.image && <>
             <a target="_blank" href={conversion.value.chart.link}>
               <img width="60" height="40" src={conversion.value.chart.image} />
               <button>Expand chart</button>
@@ -280,7 +432,14 @@ export default component$(() => {
 });
 
 
-
+export const autoCompleteCurrency = server$(async function (term: string) {
+  const currencyMatches = CURRENCIES.filter((symbol) => symbol.toLowerCase().startsWith(term.toLowerCase()));
+  const cryptoMatches = CRYPTO_SYMBOLS.filter((symbol) => symbol.toLowerCase().startsWith(term.toLowerCase()));
+  return [
+    ...currencyMatches.map(currency => ({ symbol: currency, name: CURRENCY_DATA[currency].name })),
+    ...cryptoMatches.map(crypto => ({ symbol: crypto, name: CRYPTO_COINS[crypto].name }))
+  ]
+});
 
 
 export const head: DocumentHead = (context) => {
@@ -297,6 +456,10 @@ export const head: DocumentHead = (context) => {
         name: "description",
         content: getTitle(from, to),
       },
+      { 
+        name: "image",
+        content: getLogo(from)
+      }
     ],
   };
 }
