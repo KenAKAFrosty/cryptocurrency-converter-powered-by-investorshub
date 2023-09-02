@@ -32,4 +32,21 @@ html {
 body {
   padding: 0;
   line-height: inherit;
+  background: transparent;
+}
+.bloading { 
+  filter: blur(4px);
+  -webkit-filter: blur(4px);
+  touch-action: none;
+  pointer-events: none;
+}
+a { 
+  text-decoration: none;
+}
+a:focus { 
+  outline: none;
+  color: #8202fa;
+}
+p { 
+  margin: 0;
 }
